@@ -1,0 +1,8 @@
+node_modules/
+dist/
+
+graphify-out
+.graphifyignore
+.tolongssin/.env
+marketing-kit/
+plans/
