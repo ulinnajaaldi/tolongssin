@@ -21,7 +21,8 @@ export interface StartedServer {
 }
 
 export async function startDevServer(command: string, port: number): Promise<StartedServer> {
-  const child = spawn('npm', ['run', command], { stdio: 'inherit', shell: true })
+  // NOTE: `shell: false` (default) — no shell interpolation, prevents command injection.
+  const child = spawn('npm', ['run', command], { stdio: 'inherit', shell: false })
   const ready = await waitForPort(port)
   if (!ready) {
     child.kill()

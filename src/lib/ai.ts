@@ -20,6 +20,16 @@ export const MODEL_FALLBACKS = [
   'mimo/mimo-v2-flash',
 ]
 
+// Fallback models from env (comma-separated) take priority over the hardcoded
+// list — lets users point at models their router actually has.
+export function getFallbackModels(): string[] {
+  const fromEnv = (process.env.AI_FALLBACK_MODELS ?? '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean)
+  return fromEnv.length > 0 ? fromEnv : MODEL_FALLBACKS
+}
+
 export class AiError extends Error {
   constructor(message: string) {
     super(message)
@@ -71,18 +81,22 @@ export function sanitizeModelText(raw: string): string {
     .trim()
 
   if (out.length < 20 || !looksLikeMarkdown(out) || /^(?:i need to|this is a|writing the)/i.test(out)) {
-    return ''
+    // JSON output (from generateJSON flows / structured fallback) is valid even
+    // though it is not markdown — never reject it.
+    if (!/^[\[{]/.test(out.trim())) return ''
   }
   return out
 }
 
-export function textOrReasoning(result: { text?: string; reasoning_content?: unknown }): string {
+export function textOrReasoning(result: { text?: string; reasoning_content?: unknown; reasoning?: unknown }): string {
   if (typeof result.text === 'string') {
     const cleaned = sanitizeModelText(result.text)
     if (cleaned) return cleaned
   }
-  if (typeof result.reasoning_content === 'string') {
-    const cleaned = sanitizeModelText(result.reasoning_content)
+  // AI SDK v7 exposes reasoning as `reasoning`; raw fetch responses use `reasoning_content`.
+  const reasoning = typeof result.reasoning === 'string' ? result.reasoning : result.reasoning_content
+  if (typeof reasoning === 'string') {
+    const cleaned = sanitizeModelText(reasoning)
     if (cleaned) return cleaned
   }
   return ''
@@ -110,16 +124,58 @@ async function probeModel(apiKey: string, baseURL: string, model: string): Promi
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
       body: JSON.stringify({
         model,
-        messages: [{ role: 'user', content: 'Say "OK".' }],
-        max_tokens: 8,
+        messages: [{ role: 'user', content: 'Reply with exactly: OK' }],
+        // Large enough for reasoning models to finish their chain-of-thought
+        // and still emit a content token. 8 was too small — reasoning-only
+        // routers (gemini-default etc.) consumed it all on thinking.
+        max_tokens: 512,
+        // Some routers force SSE streaming by default. Explicitly request a
+        // single JSON response so `content` is populated (probe can read it).
+        stream: false,
       }),
       signal: AbortSignal.timeout(15_000),
     })
     if (!res.ok) return { ok: false, content: '' }
     const raw = await res.text()
-    const json = JSON.parse(raw.replace(/\n?data: \[DONE\]\s*$/, '').trim())
-    const content = typeof json.choices?.[0]?.message?.content === 'string' ? json.choices[0].message.content : ''
-    const trimmed = content.trim()
+
+    // Some routers return SSE streaming (data: {...}) even without stream:true.
+    // Parse each data chunk and concatenate the delta content/reasoning.
+    const sseChunks = raw
+      .split('\n')
+      .filter((l) => l.startsWith('data:') && !l.includes('[DONE]'))
+      .map((l) => l.replace(/^data:\s*/, ''))
+
+    if (sseChunks.length > 0) {
+      let content = ''
+      let reasoning = ''
+      for (const chunk of sseChunks) {
+        try {
+          const c = JSON.parse(chunk)
+          const delta = (c.choices?.[0]?.delta ?? {}) as Record<string, unknown>
+          if (typeof delta.content === 'string') content += delta.content
+          if (typeof delta.reasoning_content === 'string') reasoning += delta.reasoning_content
+        } catch {
+          // skip malformed chunk
+        }
+      }
+      const combined = (content + reasoning).trim()
+      return { ok: combined.length > 0, content: combined }
+    }
+
+    // Non-streaming JSON response.
+    let json: Record<string, unknown>
+    try {
+      json = JSON.parse(raw.replace(/\n?data: \[DONE\]\s*$/, '').trim())
+    } catch {
+      return { ok: false, content: '' } // non-JSON response (proxy error page, etc.)
+    }
+    const choices = (json.choices ?? []) as Array<Record<string, unknown>>
+    const message = (choices[0]?.message ?? {}) as Record<string, unknown>
+    const content = typeof message.content === 'string' ? message.content : ''
+    // Reasoning models (deepseek-reasoner etc.) return empty `content` but a
+    // non-empty `reasoning_content` — that still proves the model works.
+    const reasoning = typeof message.reasoning_content === 'string' ? message.reasoning_content : ''
+    const trimmed = (content + reasoning).trim()
     return { ok: trimmed.length > 0, content: trimmed }
   } catch {
     return { ok: false, content: '' }
@@ -127,14 +183,14 @@ async function probeModel(apiKey: string, baseURL: string, model: string): Promi
 }
 
 export async function resolveWorkingModel(apiKey: string, baseURL: string): Promise<string | null> {
-  for (const model of MODEL_FALLBACKS) {
+  for (const model of getFallbackModels()) {
     const { ok } = await probeModel(apiKey, baseURL, model)
     if (ok) return model
   }
   return null
 }
 
-async function rawGenerateTextWith(prompt: string, model: string): Promise<string> {
+export async function rawGenerateTextWith(prompt: string, model: string): Promise<string> {
   const { apiKey, baseURL } = getSettings()
   const url = `${baseURL}/chat/completions`
   const res = await fetch(url, {
@@ -146,6 +202,11 @@ async function rawGenerateTextWith(prompt: string, model: string): Promise<strin
     body: JSON.stringify({
       model,
       messages: [{ role: 'user', content: prompt }],
+      // Explicitly request a single JSON response (some routers force SSE by
+      // default, which would break JSON.parse below).
+      stream: false,
+      // Reasoning models need headroom past chain-of-thought to emit content.
+      max_tokens: 4096,
     }),
     signal: AbortSignal.timeout(30_000),
   })
@@ -155,6 +216,33 @@ async function rawGenerateTextWith(prompt: string, model: string): Promise<strin
     throw new AiError(`AI request failed: ${res.status} ${body.slice(0, 200)}`)
   }
   const raw = await res.text()
+
+  // Handle routers that ignore `stream:false` and return SSE chunks anyway.
+  const sseChunks = raw
+    .split('\n')
+    .filter((l) => l.startsWith('data:') && !l.includes('[DONE]'))
+    .map((l) => l.replace(/^data:\s*/, ''))
+  if (sseChunks.length > 0) {
+    let content = ''
+    let reasoning = ''
+    for (const chunk of sseChunks) {
+      try {
+        const c = JSON.parse(chunk)
+        const delta = (c.choices?.[0]?.delta ?? {}) as Record<string, unknown>
+        if (typeof delta.content === 'string') content += delta.content
+        if (typeof delta.reasoning_content === 'string') reasoning += delta.reasoning_content
+      } catch {
+        // skip malformed chunk
+      }
+    }
+    const combined = (content + reasoning).trim()
+    if (combined) return combined
+    throw new AiError(
+      'AI returned empty content — the model only outputs internal planning. ' +
+      'Try setting AI_MODEL to a non-reasoning model (e.g. gpt-4o-mini) in .tolongssin/.env',
+    )
+  }
+
   const json = JSON.parse(raw.replace(/\n?data: \[DONE\]\s*$/, '').trim())
   const choice = json.choices?.[0]
   const content = typeof choice?.message?.content === 'string' ? choice.message.content : ''
@@ -220,7 +308,12 @@ export async function generateMarkdown(prompt: string): Promise<string> {
     } catch (err) {
       s.stop('Generation failed.')
       const msg = err instanceof Error ? err.message : String(err)
-      if (/Invalid JSON/i.test(msg)) return await rawGenerateText(prompt)
+      if (/Invalid JSON/i.test(msg)) {
+        // Structured output failed even with the fallback — last resort:
+        // raw text with the (possibly fallback-resolved) working model.
+        const fallback = await resolveWorkingModel(apiKey, baseURL)
+        if (fallback) return await rawGenerateTextWith(prompt, fallback)
+      }
       throw err
     }
   })
@@ -232,38 +325,54 @@ export async function generateJSON<T>(prompt: string, schema: z.ZodSchema<T>): P
   return safe(async () => {
     const s = spinner()
     s.start('Generating plan...')
+
+    // Try the configured model first (structured output via generateObject).
     try {
       const result = await generateObject({ model: getProvider().languageModel(model), schema, prompt })
-      if (result.object === undefined || result.object === null) {
-        const fallback = await resolveWorkingModel(apiKey, baseURL)
-        if (!fallback) {
-          throw new AiError(
-            'AI returned empty plan and no fallback model worked — set AI_MODEL to a working model.',
-          )
-        }
-        s.message(`Retrying with fallback model: ${fallback}`)
-        const retry = await generateObject({ model: getProvider().languageModel(fallback), schema, prompt })
+      if (result.object !== undefined && result.object !== null) {
+        s.stop('Plan generated.')
+        return result.object
+      }
+    } catch {
+      // fall through to fallback handling — do NOT loop on the same model
+    }
+
+    // Configured model returned nothing usable (reasoning-only output, no
+    // structured support, etc.) — resolve a working fallback and try it.
+    s.message('Configured model returned no plan; probing fallbacks...')
+    const fallback = await resolveWorkingModel(apiKey, baseURL)
+    if (!fallback) {
+      s.stop('Plan generation failed.')
+      throw new AiError(
+        'AI returned empty plan and no fallback model worked — set AI_MODEL to a working model ' +
+        'or add AI_FALLBACK_MODELS (comma-separated) pointing at models your router actually has.',
+      )
+    }
+
+    // Attempt 1: structured output with the fallback model.
+    try {
+      const retry = await generateObject({ model: getProvider().languageModel(fallback), schema, prompt })
+      if (retry.object !== undefined && retry.object !== null) {
         s.stop('Plan generated.')
         return retry.object
       }
+    } catch {
+      // fall through to raw attempt
+    }
+
+    // Attempt 2: raw text (reads reasoning_content too) with strict JSON instruction.
+    s.message(`Retrying with fallback model: ${fallback}`)
+    try {
+      const raw = await rawGenerateTextWith(prompt + '\n\nRespond with valid JSON only. No markdown, no explanation.', fallback)
+      const parsed = schema.parse(JSON.parse(raw))
       s.stop('Plan generated.')
-      return result.object
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err)
-      if (/Invalid JSON/i.test(msg)) {
-        const fallback = await resolveWorkingModel(apiKey, baseURL)
-        if (fallback) {
-          try {
-            const raw = await rawGenerateTextWith(prompt + '\n\nRespond with valid JSON only. No markdown, no explanation.', fallback)
-            return schema.parse(JSON.parse(raw))
-          } catch {
-            // fall through to the configured-model raw attempt below
-          }
-        }
-        const raw = await rawGenerateText(prompt + '\n\nRespond with valid JSON only. No markdown, no explanation.')
-        return schema.parse(JSON.parse(raw))
-      }
-      throw err
+      return parsed
+    } catch {
+      s.stop('Plan generation failed.')
+      throw new AiError(
+        `Fallback model "${fallback}" also failed to produce valid JSON. ` +
+        'Try AI_MODEL that supports JSON output, or add AI_FALLBACK_MODELS with a compatible model.',
+      )
     }
   })
 }

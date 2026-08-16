@@ -20,7 +20,11 @@
     "test": "tests"
   },
   "keywords": [],
-  "author": "",
+  "author": "Aldilla Ulinnaja",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ulinnajaaldi/tolongssin.git"
+  },
   "license": "ISC",
   "dependencies": {
     "@ai-sdk/openai-compatible": "^3.0.28",

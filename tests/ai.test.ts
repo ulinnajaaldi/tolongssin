@@ -1,6 +1,6 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { z } from 'zod'
-import { AiError, generateJSON, generateMarkdown, textOrReasoning } from '../src/lib/ai.js'
+import { AiError, generateJSON, generateMarkdown, getFallbackModels, textOrReasoning } from '../src/lib/ai.js'
 
 vi.mock('@ai-sdk/openai-compatible', () => ({
   createOpenAICompatible: vi.fn(() => ({
@@ -96,6 +96,20 @@ describe('generateJSON', () => {
   })
 })
 
+describe('getFallbackModels', () => {
+  it('returns env AI_FALLBACK_MODELS when set (comma-separated, trimmed)', () => {
+    process.env.AI_FALLBACK_MODELS = 'free-app, groq/llama-3.3-70b-versatile,'
+    expect(getFallbackModels()).toEqual(['free-app', 'groq/llama-3.3-70b-versatile'])
+  })
+
+  it('falls back to MODEL_FALLBACKS when env is empty/unset', () => {
+    delete process.env.AI_FALLBACK_MODELS
+    const models = getFallbackModels()
+    expect(models.length).toBeGreaterThan(0)
+    expect(models).toContain('groq/llama-3.3-70b-versatile')
+  })
+})
+
 describe('textOrReasoning', () => {
   it('returns genuine text when present', () => {
     const real = '# Demo\n\nA CLI tool that generates marketing kits from your repo.'
@@ -115,5 +129,11 @@ describe('textOrReasoning', () => {
   it('keeps genuine reasoning when text is planning', () => {
     const reasoning = '# API\n\nGenerate marketing kits from repo metadata.'
     expect(textOrReasoning({ text: 'Let me check the working directory first.', reasoning_content: reasoning })).toBe(reasoning)
+  })
+
+  it('reads AI SDK v7 `reasoning` field (not just reasoning_content)', () => {
+    const reasoning = '# Real content\n\nFrom the reasoning field.'
+    expect(textOrReasoning({ text: '', reasoning: reasoning })).toBe(reasoning)
+    expect(textOrReasoning({ text: 'planning only', reasoning: reasoning })).toBe(reasoning)
   })
 })
