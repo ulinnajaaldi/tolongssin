@@ -32,7 +32,7 @@ describe('generateMarkdown', () => {
     mocks.generateText.mockResolvedValue({ text: '## Hello\n\nA CLI tool that generates marketing kits from your repo.' })
     await expect(generateMarkdown('write hello')).resolves.toBe('## Hello\n\nA CLI tool that generates marketing kits from your repo.')
     expect(mocks.generateText).toHaveBeenCalledWith(
-      expect.objectContaining({ prompt: 'write hello', model: expect.objectContaining({ modelId: 'gpt-4o-mini' }) }),
+      expect.objectContaining({ prompt: expect.stringContaining('write hello'), model: expect.objectContaining({ modelId: 'gpt-4o-mini' }) }),
     )
   })
 
@@ -91,7 +91,7 @@ describe('generateJSON', () => {
     const schema = z.object({ ok: z.boolean() })
     await expect(generateJSON('parse me', schema)).resolves.toEqual({ ok: true })
     expect(mocks.generateObject).toHaveBeenCalledWith(
-      expect.objectContaining({ prompt: 'parse me', schema }),
+      expect.objectContaining({ prompt: expect.stringContaining('parse me'), schema }),
     )
   })
 })
@@ -152,6 +152,11 @@ describe('sanitizeModelText', () => {
   it('keeps LinkedIn multi-paragraph prose', () => {
     const post = 'We built test-proj because verifying integrations was a pain.\n\nNow it is a 10-second check.\n\n#devtools #testing'
     expect(sanitizeModelText(post)).toBe(post)
+  })
+
+  it('keeps single-paragraph prose (README descriptions)', () => {
+    const desc = '**test-proj** is a command-line tool for scaffolding, managing, and testing project templates directly from your terminal. It streamlines common project setup tasks so you can spin up or validate a project structure with a single command. Designed for developers who want speed without sacrificing reproducibility.'
+    expect(sanitizeModelText(desc)).toBe(desc)
   })
 
   it('rejects planning prose that contains only a bare list', () => {

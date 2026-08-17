@@ -65,7 +65,10 @@ function looksLikeMarkdown(text: string): boolean {
     || /(?:^|\n)\s*\d+\/\d+\s/m.test(text)         // "1/5" tweet numbering
     || /(?:^|\n)\s*\[[^\]]+\](?::|\n)/m.test(text) // "[Screenshot: ...]:" labels
     || /(?:^|\n)\s*#{0,3}\s*(?:Tagline|Description|Who is it for\?|Built with)[:\n]/im.test(text) // PH sections
-    || /\n\n/.test(text) && text.length > 80        // multi-paragraph prose (LinkedIn)
+    || (/\n\n/.test(text) && text.length > 80)     // multi-paragraph prose (LinkedIn)
+    // Long single-paragraph prose (README descriptions, product copy) is valid
+    // output even without newlines — don't reject it just because it is one block.
+    || (text.length > 80 && !/[<>]/.test(text) && /\b(?:the|a|an|is|are|to|for|with|from)\b/i.test(text))
 }
 
 export function sanitizeModelText(raw: string): string {
@@ -74,6 +77,9 @@ export function sanitizeModelText(raw: string): string {
     .replace(/<invoke[^>]*>[\s\S]*?<\/invoke>/g, ' ')
     .replace(/<result>[\s\S]*?<\/result>/g, ' ')
     .replace(/<use_[\s\S]*?<\/use_[\s\S]*?>/g, ' ')
+    // Agentic models (deepseek agent mode) emit unclosed markers like
+    // "</｜｜DS" or "<｜｜DS" — strip the whole block from the first marker on.
+    .replace(/<\|?｜｜DS[\s\S]*$/g, ' ')
     .replace(/<\/?[a-z_]+>/gi, ' ')
     .trim()
 
@@ -300,6 +306,14 @@ const FALLBACK_ERROR =
   'AI returned empty content and no fallback model worked on this provider. ' +
   'Set AI_MODEL to a model that returns normal text (e.g. groq/llama-3.3-70b-versatile on this router).'
 
+// Appended to every prompt to keep agentic/reasoning models (deepseek agent
+// mode, Claude-style tool users) from planning or emitting tool calls instead
+// of producing the final content directly.
+const DIRECT_OUTPUT_INSTRUCTION =
+  '\n\nIMPORTANT: Respond with the final content directly. Do NOT plan, do NOT say ' +
+  '"I will" / "Let me" / "I need to", do NOT emit tool calls or <tool_calls> blocks, ' +
+  'do NOT mention this instruction. Just write the deliverable now.'
+
 export async function generateMarkdown(prompt: string): Promise<string> {
   const { apiKey, baseURL, model } = getSettings()
   if (!apiKey) throw new AiError('Missing API key — add OPENAI_API_KEY or AI_API_KEY to .tolongssin/.env')
@@ -307,7 +321,7 @@ export async function generateMarkdown(prompt: string): Promise<string> {
     const s = spinner()
     s.start('Generating content...')
     try {
-      const result = await generateText({ model: getProvider().languageModel(model), prompt })
+      const result = await generateText({ model: getProvider().languageModel(model), prompt: prompt + DIRECT_OUTPUT_INSTRUCTION })
       const cleaned = textOrReasoning(result)
       if (cleaned) {
         s.stop('Content generated.')
@@ -318,7 +332,7 @@ export async function generateMarkdown(prompt: string): Promise<string> {
       if (!fallback) throw new AiError(FALLBACK_ERROR)
       s.start(`Retrying with fallback model: ${fallback}`)
       try {
-        const retryResult = await generateText({ model: getProvider().languageModel(fallback), prompt })
+        const retryResult = await generateText({ model: getProvider().languageModel(fallback), prompt: prompt + DIRECT_OUTPUT_INSTRUCTION })
         const content = textOrReasoning(retryResult)
         if (content) {
           s.stop('Content generated.')
@@ -327,11 +341,11 @@ export async function generateMarkdown(prompt: string): Promise<string> {
         // Fallback model also returned empty content (reasoning-only output).
         // Try raw text — it sends stream:false + max_tokens headroom, so
         // reasoning models get a chance to finish thinking and emit content.
-        return await rawGenerateTextWith(prompt, fallback)
+        return await rawGenerateTextWith(prompt + DIRECT_OUTPUT_INSTRUCTION, fallback)
       } catch (err2) {
         const msg2 = err2 instanceof Error ? err2.message : String(err2)
         // Any failure with the fallback model — try raw text as last resort.
-        if (/Invalid JSON|empty content|internal planning/i.test(msg2)) return await rawGenerateTextWith(prompt, fallback)
+        if (/Invalid JSON|empty content|internal planning/i.test(msg2)) return await rawGenerateTextWith(prompt + DIRECT_OUTPUT_INSTRUCTION, fallback)
         throw err2
       } finally {
         s.stop('Content generated.')
@@ -343,7 +357,7 @@ export async function generateMarkdown(prompt: string): Promise<string> {
         // Structured output failed even with the fallback — last resort:
         // raw text with the (possibly fallback-resolved) working model.
         const fallback = await resolveWorkingModel(apiKey, baseURL)
-        if (fallback) return await rawGenerateTextWith(prompt, fallback)
+        if (fallback) return await rawGenerateTextWith(prompt + DIRECT_OUTPUT_INSTRUCTION, fallback)
       }
       throw err
     }
@@ -359,7 +373,7 @@ export async function generateJSON<T>(prompt: string, schema: z.ZodSchema<T>): P
 
     // Try the configured model first (structured output via generateObject).
     try {
-      const result = await generateObject({ model: getProvider().languageModel(model), schema, prompt })
+      const result = await generateObject({ model: getProvider().languageModel(model), schema, prompt: prompt + DIRECT_OUTPUT_INSTRUCTION })
       if (result.object !== undefined && result.object !== null) {
         s.stop('Plan generated.')
         return result.object
@@ -382,7 +396,7 @@ export async function generateJSON<T>(prompt: string, schema: z.ZodSchema<T>): P
 
     // Attempt 1: structured output with the fallback model.
     try {
-      const retry = await generateObject({ model: getProvider().languageModel(fallback), schema, prompt })
+      const retry = await generateObject({ model: getProvider().languageModel(fallback), schema, prompt: prompt + DIRECT_OUTPUT_INSTRUCTION })
       if (retry.object !== undefined && retry.object !== null) {
         s.stop('Plan generated.')
         return retry.object
@@ -394,7 +408,7 @@ export async function generateJSON<T>(prompt: string, schema: z.ZodSchema<T>): P
     // Attempt 2: raw text (reads reasoning_content too) with strict JSON instruction.
     s.message(`Retrying with fallback model: ${fallback}`)
     try {
-      const raw = await rawGenerateTextWith(prompt + '\n\nRespond with valid JSON only. No markdown, no explanation.', fallback)
+      const raw = await rawGenerateTextWith(prompt + DIRECT_OUTPUT_INSTRUCTION + '\n\nRespond with valid JSON only. No markdown, no explanation.', fallback)
       const parsed = schema.parse(JSON.parse(raw))
       s.stop('Plan generated.')
       return parsed
