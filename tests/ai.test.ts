@@ -1,6 +1,6 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { z } from 'zod'
-import { AiError, generateJSON, generateMarkdown, getFallbackModels, textOrReasoning } from '../src/lib/ai.js'
+import { AiError, generateJSON, generateMarkdown, getFallbackModels, sanitizeModelText, textOrReasoning } from '../src/lib/ai.js'
 
 vi.mock('@ai-sdk/openai-compatible', () => ({
   createOpenAICompatible: vi.fn(() => ({
@@ -135,5 +135,32 @@ describe('textOrReasoning', () => {
     const reasoning = '# Real content\n\nFrom the reasoning field.'
     expect(textOrReasoning({ text: '', reasoning: reasoning })).toBe(reasoning)
     expect(textOrReasoning({ text: 'planning only', reasoning: reasoning })).toBe(reasoning)
+  })
+})
+
+describe('sanitizeModelText', () => {
+  it('keeps JSON output (generateJSON flow)', () => {
+    const json = '{"projectName":"qcli","valueProp":"Zero-config scaffolding","audience":"Developers","primaryCta":"npx qcli init"}'
+    expect(sanitizeModelText(json)).toBe(json)
+  })
+
+  it('keeps X thread format (1/5 numbering)', () => {
+    const thread = 'Screenshot Hook: Terminal output.\n\n1/5\nWhy is verifying still a manual headache?\n\nIntroducing `test-proj`. 🧵\n\n2/5\nWe got tired of scratch scripts.'
+    expect(sanitizeModelText(thread)).toBe(thread)
+  })
+
+  it('keeps LinkedIn multi-paragraph prose', () => {
+    const post = 'We built test-proj because verifying integrations was a pain.\n\nNow it is a 10-second check.\n\n#devtools #testing'
+    expect(sanitizeModelText(post)).toBe(post)
+  })
+
+  it('rejects planning prose that contains only a bare list', () => {
+    const planning = "Let me look at the project files.\n\nI found the repo structure. Let me set up a todo plan for this writing task.\n\n- Draft tagline\n- Draft description"
+    expect(sanitizeModelText(planning)).toBe('')
+  })
+
+  it('rejects tool-call planning prose', () => {
+    const planning = "I'll take a quick look at the repo to ground the post.\n\nLet me check the repository contents and README.\n\n<tool_calls>\n<invoke name=\"read_file\"><parameter name=\"file\">/app/package.json</parameter></invoke>\n</tool_calls>"
+    expect(sanitizeModelText(planning)).toBe('')
   })
 })

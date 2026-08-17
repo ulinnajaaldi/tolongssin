@@ -60,6 +60,12 @@ function looksLikeMarkdown(text: string): boolean {
     || /```/.test(text)                            // code fences
     || /\[[^\]]+\]\([^)]+\)/.test(text)            // links
     || /^#\s/m.test(text)                          // h1
+    // Social thread formats (X "1/5", LinkedIn paragraphs, PH sections) are
+    // legit output even without classic markdown markers.
+    || /(?:^|\n)\s*\d+\/\d+\s/m.test(text)         // "1/5" tweet numbering
+    || /(?:^|\n)\s*\[[^\]]+\](?::|\n)/m.test(text) // "[Screenshot: ...]:" labels
+    || /(?:^|\n)\s*#{0,3}\s*(?:Tagline|Description|Who is it for\?|Built with)[:\n]/im.test(text) // PH sections
+    || /\n\n/.test(text) && text.length > 80        // multi-paragraph prose (LinkedIn)
 }
 
 export function sanitizeModelText(raw: string): string {
@@ -84,6 +90,22 @@ export function sanitizeModelText(raw: string): string {
     // JSON output (from generateJSON flows / structured fallback) is valid even
     // though it is not markdown — never reject it.
     if (!/^[\[{]/.test(out.trim())) return ''
+  }
+  // Reject leftover planning prose that survived the strip above (e.g. a model
+  // that emits "I'll check the repo..." plus a tool-call block that got removed).
+  const planningStart =
+    /^(?:i'?ll|i will|let me|now let me|ok(?:ay)?[,:]? let me|the user (?:is|was)|i found|here's? (?:what|how) i|i(?:'?ll| will) (?:start|begin|set up|create|write))/i.test(out)
+    || /(?:todo plan|set up a (?:todo|plan)|plan for this (?:writing|task)|to ground the post|before (?:writing|drafting))/i.test(out.slice(0, 200))
+  if (planningStart) {
+    // Planning prose that only contains a bare list ("- Draft tagline") is still
+    // planning — require a real markdown structure (heading/code/link) after the
+    // planning phrase before accepting the output.
+    const rest = out.trim().replace(/^(?:i'?ll|i will|let me|now let me|ok(?:ay)?[,:]? let me|the user (?:is|was)|i found|here's? (?:what|how) i|i(?:'?ll| will) (?:start|begin|set up|create|write))[^\n]*\n?/i, '')
+    const hasRealMarkdown =
+      /(?:^|\n)\s*#{1,6}\s/m.test(rest)
+      || /```/.test(rest)
+      || /\[[^\]]+\]\([^)]+\)/.test(rest)
+    if (!hasRealMarkdown) return ''
   }
   return out
 }
@@ -297,10 +319,19 @@ export async function generateMarkdown(prompt: string): Promise<string> {
       s.start(`Retrying with fallback model: ${fallback}`)
       try {
         const retryResult = await generateText({ model: getProvider().languageModel(fallback), prompt })
-        return ensureNonEmpty(textOrReasoning(retryResult), 'content')
+        const content = textOrReasoning(retryResult)
+        if (content) {
+          s.stop('Content generated.')
+          return content
+        }
+        // Fallback model also returned empty content (reasoning-only output).
+        // Try raw text — it sends stream:false + max_tokens headroom, so
+        // reasoning models get a chance to finish thinking and emit content.
+        return await rawGenerateTextWith(prompt, fallback)
       } catch (err2) {
         const msg2 = err2 instanceof Error ? err2.message : String(err2)
-        if (/Invalid JSON/i.test(msg2)) return await rawGenerateTextWith(prompt, fallback)
+        // Any failure with the fallback model — try raw text as last resort.
+        if (/Invalid JSON|empty content|internal planning/i.test(msg2)) return await rawGenerateTextWith(prompt, fallback)
         throw err2
       } finally {
         s.stop('Content generated.')
