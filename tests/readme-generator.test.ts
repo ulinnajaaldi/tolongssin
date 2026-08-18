@@ -125,7 +125,7 @@ describe("scrubSecrets", () => {
 describe("backupFileName", () => {
   it("formats a timestamped backup name", () => {
     expect(backupFileName(new Date(2026, 7, 10, 9, 5, 3))).toMatch(
-      /^README\.md\.20260810-090503$/,
+      /^README\.md\.20260810-090503-\d{3}$/,
     );
   });
 });

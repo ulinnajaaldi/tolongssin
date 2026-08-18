@@ -80,7 +80,6 @@ function topLevelEntries(cwd: string): string[] {
 
 export function analyzeRepo(cwd: string): RepoInfo {
   const pkg = readJson(join(cwd, "package.json"));
-  const pkgText = readText(join(cwd, "package.json")) ?? "";
   const pyprojectText = readText(join(cwd, "pyproject.toml")) ?? "";
   const manifest = readJson(join(cwd, "manifest.json"));
 

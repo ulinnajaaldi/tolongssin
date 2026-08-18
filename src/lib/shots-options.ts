@@ -23,7 +23,7 @@ export function resolveTargetUrl(
 }
 
 export function buildCapturePlan(
-  opts: ShotsOptions,
+  _opts: ShotsOptions,
   isWebApp: boolean,
   configScreenshotsUrl: string | undefined,
   serverCommand: string | null,
