@@ -389,7 +389,24 @@ export async function generateMarkdown(prompt: string): Promise<string> {
         s.stop("Content generated.");
         return cleaned;
       }
-      s.stop("Configured model returned empty content; probing fallbacks...");
+      s.stop("Configured model returned empty content; trying raw transport...");
+      // AI SDK uses streaming internally which some reasoning models (promax,
+      // deepseek-v4-pro) respond to with reasoning-only output (empty content).
+      // Retry the SAME model via raw fetch with stream:false — it often works
+      // because the model receives a non-streaming request and emits content.
+      try {
+        const raw = await rawGenerateTextWith(
+          prompt + DIRECT_OUTPUT_INSTRUCTION,
+          model,
+        );
+        if (raw) {
+          s.stop("Content generated.");
+          return raw;
+        }
+      } catch {
+        // raw attempt also failed — fall through to probe fallback models
+      }
+      s.start("Probing fallback models...");
       const fallback = await resolveWorkingModel(apiKey, baseURL);
       if (!fallback) throw new AiError(FALLBACK_ERROR);
       s.start(`Retrying with fallback model: ${fallback}`);
@@ -466,6 +483,22 @@ export async function generateJSON<T>(
       }
     } catch {
       // fall through to fallback handling — do NOT loop on the same model
+    }
+
+    // Same-model raw attempt: some reasoning models (promax, deepseek-v4-pro)
+    // only emit content via non-streaming requests (stream:false). generateObject
+    // uses streaming internally, so retry the SAME model with raw fetch.
+    s.message("Configured model returned no plan; trying raw transport...");
+    try {
+      const raw = await rawGenerateTextWith(
+        prompt + DIRECT_OUTPUT_INSTRUCTION + "\n\nRespond with valid JSON only, matching EXACTLY this shape:\n" + describeSchema(schema),
+        model,
+      );
+      const parsed = schema.parse(JSON.parse(raw));
+      s.stop("Plan generated.");
+      return parsed;
+    } catch {
+      // fall through to fallback probe
     }
 
     // Configured model returned nothing usable (reasoning-only output, no
