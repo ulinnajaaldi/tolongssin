@@ -1,5 +1,5 @@
 {
-  "name": "tolongssin",
+  "name": "@ulinnajaaldi/tolongssin",
   "version": "0.1.0",
   "description": "Developer marketing kit CLI — project done, marketing zero, tolong sin.",
   "type": "module",
@@ -28,6 +28,15 @@
     "url": "https://github.com/ulinnajaaldi/tolongssin.git"
   },
   "license": "ISC",
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com",
+    "access": "public"
+  },
+  "files": [
+    "bin/",
+    "dist/",
+    "skills/"
+  ],
   "dependencies": {
     "@ai-sdk/openai-compatible": "^3.0.28",
     "@clack/prompts": "1.7",
