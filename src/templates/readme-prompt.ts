@@ -57,13 +57,12 @@ Write a README with this structure:
 3. Quickstart (exact commands; use ${input.repoType}-appropriate install)
 4. Features (bullets, benefit-led, max 6)
 5. Screenshots section (placeholders if none exist)
-6. Roadmap (max 3 items)
-7. Contributing (1 short paragraph) + License
 
 Rules:
 - Write in English.
 - Short lines. No corporate filler. No "unlock the power of".
 - If a section does not apply, omit it — do not pad.
+- Do not add LICENSE, CONTRIBUTING, CHANGELOG, or roadmap sections — dedicated files cover them.
 - NEVER include API keys, tokens, credentials, or anything that looks like a secret.
 - Never invent metrics, testimonials, or contributors.`;
 }
