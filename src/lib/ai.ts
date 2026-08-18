@@ -440,7 +440,7 @@ export async function generateMarkdown(prompt: string): Promise<string> {
         s.stop("Content generated.");
       }
     } catch (err) {
-      s.stop("Generation failed.");
+      s.stop();
       const msg = err instanceof Error ? err.message : String(err);
       if (/Invalid JSON/i.test(msg)) {
         // Structured output failed even with the fallback — last resort:

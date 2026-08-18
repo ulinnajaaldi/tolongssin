@@ -20,7 +20,8 @@ export async function runAll(opts: { dryRun?: boolean }): Promise<void> {
   const { runSocial } = await import("./social.js");
   const { runLanding } = await import("./landing.js");
 
-  console.log("\n─── Step 1/3: README ───");
+  console.log(`\n─── Step 1/3: README ───`);
+  console.log(`    Using model: ${process.env.AI_MODEL ?? "default"}\n`);
   await runReadme(opts);
 
   console.log("\n─── Step 2/3: Screenshots ───");
