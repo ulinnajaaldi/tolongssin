@@ -1,8 +1,10 @@
+import type { RepoType } from '../lib/config.js'
+
 export interface ReadmePromptInput {
   projectName: string
   valueProp: string
   audience: string
-  repoType: string
+  repoType: RepoType
   primaryCta?: string
   repoInfo: {
     name?: string

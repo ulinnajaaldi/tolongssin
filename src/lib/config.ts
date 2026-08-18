@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
-export type RepoType = 'cli' | 'lib' | 'webapp' | 'plugin' | 'other'
+export type RepoType = 'cli' | 'lib' | 'webapp' | 'api' | 'monorepo' | 'plugin' | 'other'
 
 export interface TolongssinConfig {
   projectName: string

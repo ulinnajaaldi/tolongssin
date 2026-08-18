@@ -95,7 +95,7 @@ export function sanitizeModelText(raw: string): string {
   if (out.length < 20 || !looksLikeMarkdown(out) || /^(?:i need to|this is a|writing the)/i.test(out)) {
     // JSON output (from generateJSON flows / structured fallback) is valid even
     // though it is not markdown — never reject it.
-    if (!/^[\[{]/.test(out.trim())) return ''
+    if (!/^[[{]/.test(out.trim())) return ''
   }
   // Reject leftover planning prose that survived the strip above (e.g. a model
   // that emits "I'll check the repo..." plus a tool-call block that got removed).
@@ -130,15 +130,6 @@ export function textOrReasoning(result: { text?: string; reasoning_content?: unk
   return ''
 }
 
-function ensureNonEmpty(text: string, context: string): string {
-  if (!text.trim()) {
-    throw new AiError(
-      `AI returned empty ${context} — the model only outputs internal planning. ` +
-      'Try setting AI_MODEL to a non-reasoning model (e.g. gpt-4o-mini) in .tolongssin/.env',
-    )
-  }
-  return text
-}
 
 interface ProbeResult {
   ok: boolean

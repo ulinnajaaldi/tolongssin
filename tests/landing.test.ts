@@ -107,7 +107,7 @@ describe('slopTest', () => {
   })
 
   it('catches emoji overload', () => {
-    const html = '<p>' + '\uD83C\uDF89'.repeat(20) + '</p>'
+    const html = `<p>${'\uD83C\uDF89'.repeat(20)}</p>`
     expect(slopTest(html)).toHaveLength(1)
   })
 

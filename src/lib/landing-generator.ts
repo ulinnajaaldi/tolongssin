@@ -273,7 +273,7 @@ export async function generateLanding(
   if (existsSync(configPath)) {
     const existing: TolongssinConfig = JSON.parse(readFileSync(configPath, 'utf8'))
     existing.landingPage = { ...existing.landingPage, ...cfg.landingPage }
-    writeFileSync(configPath, JSON.stringify(existing, null, 2) + '\n', 'utf8')
+    writeFileSync(configPath, `${JSON.stringify(existing, null, 2)}\n`, 'utf8')
   }
 
   console.log(violations.length > 0
