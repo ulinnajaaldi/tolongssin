@@ -333,7 +333,7 @@ export async function generateLanding(
     repoContext,
   });
 
-  const plan = await generateJSON(prompt, SectionPlanSchema);
+  const plan = await generateJSON(prompt, SectionPlanSchema, "landing");
 
   let html = renderLandingPage({
     plan,
@@ -343,7 +343,7 @@ export async function generateLanding(
   let violations = slopTest(html);
   if (violations.length > 0) {
     const feedback = `\n\nPrevious plan violated: ${violations.join("; ")}. Choose different fonts, accent, or layout.`;
-    const retryPlan = await generateJSON(prompt + feedback, SectionPlanSchema);
+    const retryPlan = await generateJSON(prompt + feedback, SectionPlanSchema, "landing");
     html = renderLandingPage({
       plan: retryPlan,
       projectName: cfg.projectName,

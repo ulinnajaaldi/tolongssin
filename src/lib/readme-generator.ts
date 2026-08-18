@@ -123,7 +123,7 @@ export async function generateReadme(
 
   let draft: string;
   try {
-    draft = await generateMarkdown(prompt);
+    draft = await generateMarkdown(prompt, "readme");
   } catch (err) {
     throw new Error(
       `Failed to generate README draft: ${err instanceof Error ? err.message : String(err)}`,

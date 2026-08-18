@@ -1,0 +1,13 @@
+{
+  "projectName": "tolongssin",
+  "valueProp": "Developer marketing kit CLI",
+  "audience": "Developers",
+  "repoType": "cli",
+  "primaryCta": "Get started",
+  "landingPage": {
+    "macrostructure": "terminal",
+    "macrostructureHistory": [
+      "terminal"
+    ]
+  }
+}

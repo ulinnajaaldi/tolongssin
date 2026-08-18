@@ -1,11 +1,46 @@
-import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
-import { spinner } from "@clack/prompts";
-import { generateObject, generateText } from "ai";
 import { config as dotenvConfig } from "dotenv";
+import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
+import { generateObject, generateText } from "ai";
+import { spinner } from "@clack/prompts";
+import { readFileSync, existsSync } from "node:fs";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { envPath } from "./config.js";
 
 dotenvConfig({ path: envPath(), quiet: true });
+
+// --- Skill loading -----------------------------------------------------------
+// Skills live in skills/<name>/SKILL.md relative to the package root.
+// Loaded once at startup, cached in memory.
+
+const __dirname = typeof import.meta.dirname === "string" ? import.meta.dirname : dirname(fileURLToPath(import.meta.url));
+
+function findSkillsRoot(): string {
+  // Walk up from __dirname looking for a skills/ directory (works in src and dist)
+  let dir: string = __dirname;
+  for (let i = 0; i < 8; i++) {
+    const candidate = join(dir, "skills");
+    if (existsSync(candidate)) return candidate;
+    dir = dirname(dir);
+  }
+  // Fallback: cwd
+  return join(process.cwd(), "skills");
+}
+
+const SKILLS_ROOT = findSkillsRoot();
+const skillCache = new Map<string, string>();
+
+export function loadSkill(name: string): string | null {
+  if (skillCache.has(name)) return skillCache.get(name)!;
+  const path = join(SKILLS_ROOT, name, "SKILL.md");
+  if (!existsSync(path)) return null;
+  const raw = readFileSync(path, "utf8");
+  // Strip YAML frontmatter (---...---)
+  const content = raw.replace(/^---[\s\S]*?---\s*/, "").trim();
+  skillCache.set(name, content);
+  return content;
+}
 
 export const DEFAULT_BASE_URL = "https://api.openai.com/v1";
 export const DEFAULT_MODEL = "gpt-4o-mini";
@@ -370,19 +405,25 @@ const DIRECT_OUTPUT_INSTRUCTION =
   '"I will" / "Let me" / "I need to", do NOT emit tool calls or <tool_calls> blocks, ' +
   "do NOT mention this instruction. Just write the deliverable now.";
 
-export async function generateMarkdown(prompt: string): Promise<string> {
+export async function generateMarkdown(prompt: string, skillName?: string): Promise<string> {
   const { apiKey, baseURL, model } = getSettings();
   if (!apiKey)
     throw new AiError(
       "Missing API key — add OPENAI_API_KEY or AI_API_KEY to .tolongssin/.env",
     );
+  const skill = skillName ? loadSkill(skillName) : null;
+  // Skill content replaces DIRECT_OUTPUT_INSTRUCTION when present — the skill
+  // file itself contains all anti-slop rules, output format, and model-agnostic
+  // instructions. DIRECT_OUTPUT_INSTRUCTION is the minimal fallback when no skill
+  // file exists.
+  const instruction = skill ? `\n\n${skill}` : DIRECT_OUTPUT_INSTRUCTION;
   return safe(async () => {
     const s = spinner();
     s.start("Generating content...");
     try {
       const result = await generateText({
         model: getProvider().languageModel(model),
-        prompt: prompt + DIRECT_OUTPUT_INSTRUCTION,
+        prompt: prompt + instruction,
       });
       const cleaned = textOrReasoning(result);
       if (cleaned) {
@@ -390,15 +431,8 @@ export async function generateMarkdown(prompt: string): Promise<string> {
         return cleaned;
       }
       s.stop("Configured model returned empty content; trying raw transport...");
-      // AI SDK uses streaming internally which some reasoning models (promax,
-      // deepseek-v4-pro) respond to with reasoning-only output (empty content).
-      // Retry the SAME model via raw fetch with stream:false — it often works
-      // because the model receives a non-streaming request and emits content.
       try {
-        const raw = await rawGenerateTextWith(
-          prompt + DIRECT_OUTPUT_INSTRUCTION,
-          model,
-        );
+        const raw = await rawGenerateTextWith(prompt + instruction, model);
         if (raw) {
           s.stop("Content generated.");
           return raw;
@@ -413,18 +447,15 @@ export async function generateMarkdown(prompt: string): Promise<string> {
       try {
         const retryResult = await generateText({
           model: getProvider().languageModel(fallback),
-          prompt: prompt + DIRECT_OUTPUT_INSTRUCTION,
+          prompt: prompt + instruction,
         });
         const content = textOrReasoning(retryResult);
         if (content) {
           s.stop("Content generated.");
           return content;
         }
-        // Fallback model also returned empty content (reasoning-only output).
-        // Try raw text — it sends stream:false + max_tokens headroom, so
-        // reasoning models get a chance to finish thinking and emit content.
         return await rawGenerateTextWith(
-          prompt + DIRECT_OUTPUT_INSTRUCTION,
+          prompt + instruction,
           fallback,
         );
       } catch (err2) {
@@ -432,7 +463,7 @@ export async function generateMarkdown(prompt: string): Promise<string> {
         // Any failure with the fallback model — try raw text as last resort.
         if (/Invalid JSON|empty content|internal planning/i.test(msg2))
           return await rawGenerateTextWith(
-            prompt + DIRECT_OUTPUT_INSTRUCTION,
+            prompt + instruction,
             fallback,
           );
         throw err2;
@@ -447,10 +478,7 @@ export async function generateMarkdown(prompt: string): Promise<string> {
         // raw text with the (possibly fallback-resolved) working model.
         const fallback = await resolveWorkingModel(apiKey, baseURL);
         if (fallback)
-          return await rawGenerateTextWith(
-            prompt + DIRECT_OUTPUT_INSTRUCTION,
-            fallback,
-          );
+          return await rawGenerateTextWith(prompt + instruction, fallback);
       }
       throw err;
     }
@@ -460,12 +488,15 @@ export async function generateMarkdown(prompt: string): Promise<string> {
 export async function generateJSON<T>(
   prompt: string,
   schema: z.ZodSchema<T>,
+  skillName?: string,
 ): Promise<T> {
   const { apiKey, baseURL, model } = getSettings();
   if (!apiKey)
     throw new AiError(
       "Missing API key — add OPENAI_API_KEY or AI_API_KEY to .tolongssin/.env",
     );
+  const skill = skillName ? loadSkill(skillName) : null;
+  const instruction = skill ? `\n\n${skill}` : DIRECT_OUTPUT_INSTRUCTION;
   return safe(async () => {
     const s = spinner();
     s.start("Generating plan...");
@@ -475,7 +506,7 @@ export async function generateJSON<T>(
       const result = await generateObject({
         model: getProvider().languageModel(model),
         schema,
-        prompt: prompt + DIRECT_OUTPUT_INSTRUCTION,
+        prompt: prompt + instruction,
       });
       if (result.object !== undefined && result.object !== null) {
         s.stop("Plan generated.");
@@ -485,13 +516,11 @@ export async function generateJSON<T>(
       // fall through to fallback handling — do NOT loop on the same model
     }
 
-    // Same-model raw attempt: some reasoning models (promax, deepseek-v4-pro)
-    // only emit content via non-streaming requests (stream:false). generateObject
-    // uses streaming internally, so retry the SAME model with raw fetch.
+    // Same-model raw attempt
     s.message("Configured model returned no plan; trying raw transport...");
     try {
       const raw = await rawGenerateTextWith(
-        prompt + DIRECT_OUTPUT_INSTRUCTION + "\n\nRespond with valid JSON only, matching EXACTLY this shape:\n" + describeSchema(schema),
+        prompt + instruction + "\n\nRespond with valid JSON only, matching EXACTLY this shape:\n" + describeSchema(schema),
         model,
       );
       const parsed = schema.parse(JSON.parse(raw));
@@ -501,9 +530,7 @@ export async function generateJSON<T>(
       // fall through to fallback probe
     }
 
-    // Configured model returned nothing usable (reasoning-only output, no
-    // structured support, etc.) — resolve a working fallback and try it.
-    s.message("Configured model returned no plan; probing fallbacks...");
+    s.message("Probing fallback models...");
     const fallback = await resolveWorkingModel(apiKey, baseURL);
     if (!fallback) {
       s.stop("Plan generation failed.");
@@ -513,12 +540,11 @@ export async function generateJSON<T>(
       );
     }
 
-    // Attempt 1: structured output with the fallback model.
     try {
       const retry = await generateObject({
         model: getProvider().languageModel(fallback),
         schema,
-        prompt: prompt + DIRECT_OUTPUT_INSTRUCTION,
+        prompt: prompt + instruction,
       });
       if (retry.object !== undefined && retry.object !== null) {
         s.stop("Plan generated.");
@@ -528,12 +554,11 @@ export async function generateJSON<T>(
       // fall through to raw attempt
     }
 
-    // Attempt 2: raw text (reads reasoning_content too) with strict JSON instruction.
     s.message(`Retrying with fallback model: ${fallback}`);
     try {
       const raw = await rawGenerateTextWith(
         prompt +
-          DIRECT_OUTPUT_INSTRUCTION +
+          instruction +
           "\n\nRespond with valid JSON only, matching EXACTLY this shape (no extra fields, no markdown, no explanation):\n" +
           describeSchema(schema),
         fallback,

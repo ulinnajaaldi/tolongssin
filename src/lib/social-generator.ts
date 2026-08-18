@@ -195,7 +195,7 @@ export async function generateSocialDrafts(
       async (job): Promise<SocialDraft> => ({
         platform: job.platform,
         filename: job.filename,
-        content: await generateMarkdown(job.prompt),
+        content: await generateMarkdown(job.prompt, "social"),
       }),
     ),
   );

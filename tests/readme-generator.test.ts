@@ -66,6 +66,7 @@ describe("generateReadme", () => {
     await generateReadme(repoInfo, cfg, { dryRun: true }, dir);
     expect(mocks.generateMarkdown).toHaveBeenCalledWith(
       expect.stringContaining("Value proposition: Saves time"),
+      "readme",
     );
   });
 
