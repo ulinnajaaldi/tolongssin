@@ -1,32 +1,43 @@
-import { spawn } from 'node:child_process'
-import { setTimeout as delay } from 'node:timers/promises'
-import { DEFAULT_PORT } from './shots-options.js'
+import { spawn } from "node:child_process";
+import { setTimeout as delay } from "node:timers/promises";
+import { DEFAULT_PORT } from "./shots-options.js";
 
-export async function waitForPort(port: number, timeoutMs = 60_000): Promise<boolean> {
-  const deadline = Date.now() + timeoutMs
+export async function waitForPort(
+  port: number = DEFAULT_PORT,
+  timeoutMs = 60_000,
+): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     try {
-      const res = await fetch(`http://localhost:${port}`)
-      if (res.ok) return true
+      const res = await fetch(`http://localhost:${port}`);
+      if (res.ok) return true;
     } catch {
       // not up yet
     }
-    await delay(500)
+    await delay(500);
   }
-  return false
+  return false;
 }
 
 export interface StartedServer {
-  kill: () => void
+  kill: () => void;
 }
 
-export async function startDevServer(command: string, port: number): Promise<StartedServer> {
+export async function startDevServer(
+  command: string,
+  port: number,
+): Promise<StartedServer> {
   // NOTE: `shell: false` (default) — no shell interpolation, prevents command injection.
-  const child = spawn('npm', ['run', command], { stdio: 'inherit', shell: false })
-  const ready = await waitForPort(port)
+  const child = spawn("npm", ["run", command], {
+    stdio: "inherit",
+    shell: false,
+  });
+  const ready = await waitForPort(port);
   if (!ready) {
-    child.kill()
-    throw new Error(`Dev server did not respond on http://localhost:${port} within 60s`)
+    child.kill();
+    throw new Error(
+      `Dev server did not respond on http://localhost:${port} within 60s`,
+    );
   }
-  return { kill: () => child.kill() }
+  return { kill: () => child.kill() };
 }

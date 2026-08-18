@@ -1,0 +1,9 @@
+{
+  "editor.formatOnSave": true,
+  "editor.defaultFormatter": "biomejs.biome",
+  "editor.codeActionsOnSave": {
+    "source.organizeImports.biome": "explicit"
+  },
+  "explorer.compactFolders": false,
+  "js/ts.tsdk.path": "node_modules/typescript/lib"
+}
