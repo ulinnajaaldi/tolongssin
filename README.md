@@ -1,48 +1,66 @@
 # tolongssin
 
-Project done, marketing zero — tolong sin.
+Turn your project into marketing material in one CLI command.
 
-A CLI that turns a finished codebase into a README, social media posts, and screenshots. No docs effort required — the AI does the talking.
+## Requirements
 
-## What it does
+- Node.js >= 24
 
-You built the project. Marketing is the part you skipped. `tolongssin` analyzes your codebase and generates the promo kit you'd never write yourself — a polished README, ready-to-post social drafts, and website screenshots. Run one command after finishing your project and get a shareable marketing kit in minutes.
-
-## Quickstart
+## Install
 
 ```bash
 npm install -g tolongssin
+```
+
+## Quick Start
+
+```bash
 tolongssin init
 tolongssin all
 ```
 
-`tolongssin init` sets up your project config. `tolongssin all` generates everything — README, social drafts, and screenshots — into a `marketing-kit/` folder.
+Generates `marketing-kit/` with README, social drafts, screenshots, and an optional landing page.
+
+## What It Does
+
+You finished the code. Marketing left undone. `tolongssin` scans your project, writes a polished README, drafts social posts, and captures screenshots. Run once, share everywhere.
+
+## Commands
+
+| Command | Description |
+| --- | --- |
+| `init` | Set up `.tolongssin` config |
+| `readme` | Generate / improve `README.md` |
+| `shots` | Capture responsive website screenshots |
+| `social` | Draft X / LinkedIn / Product Hunt posts |
+| `landing` | Generate an opt-in landing page |
+| `all` | Run `init` → `readme` → `shots` → `social` (landing optional) |
+
+Every command supports `--dry-run` to preview the plan before writing. `landing` also accepts `--study <url>` to extract the design DNA from a reference site.
+
+## Output
+
+```
+marketing-kit/
+├── README.md
+├── social/
+│   ├── x-draft.md
+│   ├── linkedin-draft.md
+│   └── producthunt-draft.md
+└── screenshots/
+    ├── homepage-1200px.png
+    └── mobile-768px.png
+```
 
 ## Features
 
-- **README generator** — turns your codebase into a clean, structured README
-- **Social media drafts** — ready-to-post copy for Twitter/X, LinkedIn, and Product Hunt
-- **Screenshots** — captures responsive website images with Playwright
-- **Landing page builder** — optional single-page landing page from your project details
-- **Dry-run mode** — preview what would change before anything is written
-- **Works offline** — cached AI prompts after the first run
-
-## Screenshots
-
-```
-[README.md generated in repo root]
-[marketing-kit/social/x-draft.md]
-[marketing-kit/screenshots/homepage-1200px.png]
-```
-
-## Roadmap
-
-- Auto-publish drafts to GitHub Releases
-- Support for Python/Go projects
-- Mastodon/Bluesky social templates
+- Generates clean README from your codebase
+- Drafts ready-to-post social copy for X, LinkedIn, Product Hunt
+- Captures responsive screenshots via Playwright
+- Builds optional landing page from project details
+- Dry-run mode to preview changes before writing
+- Offline cache for AI prompts after first run
 
 ## Contributing
 
-Fork, change, PR. Tests live in `tests/` — run `npm test` before committing.
-
-License: ISC
+Fork, change, PR. Tests in `tests/`. Run `npm test` before commit. License: ISC
