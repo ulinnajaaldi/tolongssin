@@ -8,8 +8,14 @@ Turn your project into marketing material in one CLI command.
 
 ## Install
 
+**From npm (npmjs.org):**
 ```bash
-npm install -g tolongssin
+npm install -g @ulinnajaaldi/tolongssin
+```
+
+**From GitHub Packages:**
+```bash
+npm install -g @ulinnajaaldi/tolongssin --registry https://npm.pkg.github.com
 ```
 
 ## Quick Start
