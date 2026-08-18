@@ -50,7 +50,14 @@ Rules (Hallmark anti-AI-slop DNA):
 - Solid surfaces (subtle borders or flat fills, no glassmorphism).
 - Sections: each has a short human heading, a 1-2 sentence body (no corporate filler), and an optional CTA.
 - Do NOT invent metrics, testimonials, or fake quotes.
-- Short, punchy copy. No "unlock the power of" or "revolutionize".`
+- Short, punchy copy. No "unlock the power of" or "revolutionize".
+- NO centered-everything hero: at most two centered elements; the eyebrow or CTA must sit off-axis.
+- NO three-equal-column card grid with icon-above-heading tiles. Vary the layout rhythm.
+- NO italic headers — carry emphasis with weight, accent color, or underline.
+- NO fake browser/phone/IDE chrome, no re-drawn UI mockups.
+- NO purple-to-blue or cyan-to-magenta gradients anywhere (including gradient text).
+- Fonts: display + body must be distinct, non-default, non-Inter pair. Prefer 2+1 discipline (one display, one body, one mono at most).
+- Pre-emit self-critique: before returning, score the plan 1-5 on Philosophy, Hierarchy, Execution, Specificity, Restraint, Variety. Anything < 3 → revise.`
 }
 
 export async function fetchStudySignals(url: string): Promise<string | null> {
@@ -73,6 +80,8 @@ export async function fetchStudySignals(url: string): Promise<string | null> {
 
 export function slopTest(html: string): string[] {
   const violations: string[] = []
+
+  // Typography
   if (/Inter/gi.test(html) && (html.match(/font-family/gi)?.length ?? 0) > 0) {
     const displayMatch = html.match(/--display-font:([^;]+)/i)?.[1]
     const bodyMatch = html.match(/--body-font:([^;]+)/i)?.[1]
@@ -80,11 +89,56 @@ export function slopTest(html: string): string[] {
       violations.push('Inter used for both display and body font')
     }
   }
-  if (/linear-gradient\([^)]*(?:purple|#8b5cf6|#a855f7|#ec4899|#d946ef|#f472b6)/i.test(html)) {
-    violations.push('Purple-to-pink gradient detected')
+  // Default/system fonts are an AI tell — but only when used as the PRIMARY font,
+  // not as a fallback in a stack (e.g. "'Fira Code', sans-serif" is fine).
+  if (
+    /\bfont-family\s*:\s*(?:'[^']*'|"[^"]*"|\w+)\s*,\s*(?:Roboto|Open\s*Sans|Poppins|Lato|Arial|Helvetica)\b/i.test(html) === false
+    && /\bfont-family\s*:\s*(?:Roboto|Open\s*Sans|Poppins|Lato|Arial|Helvetica|sans-serif|system-ui|ui-sans-serif)\b/i.test(html)
+  ) {
+    violations.push('Default/system font detected (Roboto, Open Sans, Poppins, Lato, Arial, etc.)')
   }
+  // Italic headers
+  if (/<h[1-6][^>]*style="[^"]*font-style\s*:\s*italic/i.test(html)) {
+    violations.push('Italic header detected')
+  }
+
+  // Gradients — purple-to-pink, purple-to-blue, cyan-to-magenta, gradient text
+  if (/linear-gradient\([^)]*(?:purple|#8b5cf6|#a855f7|#ec4899|#d946ef|#f472b6|#6366f1|#8b5cf6|#06b6d4|#ec4899)/i.test(html)) {
+    violations.push('Purple-to-pink/blue gradient detected')
+  }
+  if (/background-clip\s*:\s*text/i.test(html) && /linear-gradient|radial-gradient/i.test(html)) {
+    violations.push('Gradient text (background-clip: text) detected')
+  }
+
+  // Layout anti-patterns
+  if (/grid-template-columns\s*:\s*repeat\s*\(\s*3\s*,\s*1fr\s*\)/i.test(html) && /icon|svg/i.test(html)) {
+    violations.push('3-equal-column icon-above-heading card grid detected')
+  }
+  if (/min-height\s*:\s*100vh/i.test(html) && /text-align\s*:\s*center/i.test(html)) {
+    violations.push('Centered-everything hero (100vh + centered) detected')
+  }
+  // Fake chrome: browser dots / phone frame / code window title bar
+  if (/traffic|dots?\s*(?:red|yellow|green)|#ff5f56|#ffbd2e|#27c93f/.test(html)) {
+    violations.push('Fake browser chrome (traffic-light dots) detected')
+  }
+  if (/\bframe\b[^>]*>\s*<img|border-radius\s*:\s*3rem[^;]*;\s*[^}]*padding\s*:\s*1rem/i.test(html)) {
+    violations.push('Fake phone frame detected')
+  }
+
+  // Emoji overload
   const emojiCount = (html.match(/[\p{Emoji_Presentation}\p{Extended_Pictographic}]/gu) ?? []).length
   if (emojiCount > 10) violations.push('Emoji overload detected')
+
+  // Invented metrics / testimonials
+  if (/\+\d+\s*%|\d+\s*\+?\s*(?:users|teams|customers|stars|downloads)|trusted by|10x|50,000|100k/i.test(html)) {
+    violations.push('Invented metric or "trusted by" claim detected')
+  }
+
+  // Glassmorphism
+  if (/backdrop-filter\s*:\s*blur|rgba\(\s*255,\s*255,\s*255,\s*0\.[0-9]+\s*\)/.test(html)) {
+    violations.push('Glassmorphism (backdrop blur / translucent white) detected')
+  }
+
   return violations
 }
 
@@ -97,6 +151,7 @@ export interface LandingRenderInput {
 export function renderLandingPage(input: LandingRenderInput): string {
   const { plan, projectName, primaryCta } = input
   const cta = primaryCta ?? 'Get started'
+  const accent = normalizeAccent(plan.accentHue)
   const sections = plan.sections.map(s => `
       <section style="padding: 4rem 2rem; max-width: 800px; margin: 0 auto;">
         <h2 style="font-family: var(--display-font); font-size: 1.75rem; margin-bottom: 1rem;">${escHtml(s.heading)}</h2>
@@ -115,7 +170,7 @@ export function renderLandingPage(input: LandingRenderInput): string {
   <script src="https://cdn.tailwindcss.com"></script>
   <style>
     :root {
-      --accent: ${plan.accentHue};
+      --accent: ${accent};
       --display-font: '${plan.displayFont}', sans-serif;
       --body-font: '${plan.bodyFont}', sans-serif;
     }
@@ -139,6 +194,17 @@ export function renderLandingPage(input: LandingRenderInput): string {
 
 function escHtml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+}
+
+// Models sometimes return accentHue as a bare hue number ("24") instead of a
+// CSS color. Normalize: valid hex/hsl pass through, bare numbers become hsl().
+export function normalizeAccent(accent: string): string {
+  const trimmed = accent.trim()
+  if (/^#[0-9a-fA-F]{3,8}$/.test(trimmed)) return trimmed
+  if (/^hsl\(/.test(trimmed) || /^rgb\(/.test(trimmed)) return trimmed
+  const hue = Number(trimmed)
+  if (Number.isFinite(hue)) return `hsl(${Math.round(hue) % 360} 70% 45%)`
+  return '#E15554' // safe fallback
 }
 
 export interface LandingOptions {

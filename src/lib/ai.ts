@@ -2,7 +2,7 @@ import { config as dotenvConfig } from 'dotenv'
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible'
 import { generateObject, generateText } from 'ai'
 import { spinner } from '@clack/prompts'
-import type { z } from 'zod'
+import { z } from 'zod'
 import { envPath } from './config.js'
 
 dotenvConfig({ path: envPath(), quiet: true })
@@ -408,7 +408,13 @@ export async function generateJSON<T>(prompt: string, schema: z.ZodSchema<T>): P
     // Attempt 2: raw text (reads reasoning_content too) with strict JSON instruction.
     s.message(`Retrying with fallback model: ${fallback}`)
     try {
-      const raw = await rawGenerateTextWith(prompt + DIRECT_OUTPUT_INSTRUCTION + '\n\nRespond with valid JSON only. No markdown, no explanation.', fallback)
+      const raw = await rawGenerateTextWith(
+        prompt
+        + DIRECT_OUTPUT_INSTRUCTION
+        + '\n\nRespond with valid JSON only, matching EXACTLY this shape (no extra fields, no markdown, no explanation):\n'
+        + describeSchema(schema),
+        fallback,
+      )
       const parsed = schema.parse(JSON.parse(raw))
       s.stop('Plan generated.')
       return parsed
@@ -420,4 +426,44 @@ export async function generateJSON<T>(prompt: string, schema: z.ZodSchema<T>): P
       )
     }
   })
+}
+
+// Renders a compact JSON shape (example values) from a zod schema so raw-text
+// fallback can tell the model exactly what structure to return.
+function describeSchema<T>(schema: z.ZodSchema<T>): string {
+  try {
+    return JSON.stringify(schemaToExample(schema), null, 2)
+  } catch {
+    return '{}'
+  }
+}
+
+function schemaToExample(schema: z.ZodTypeAny): unknown {
+  if (schema instanceof z.ZodObject) {
+    const shape = (schema as unknown as { shape: Record<string, z.ZodTypeAny> }).shape
+    const out: Record<string, unknown> = {}
+    for (const [key, sub] of Object.entries(shape)) {
+      out[key] = schemaToExample(sub as z.ZodTypeAny)
+    }
+    return out
+  }
+  if (schema instanceof z.ZodArray) {
+    return [schemaToExample((schema as unknown as { element: z.ZodTypeAny }).element)]
+  }
+  if (schema instanceof z.ZodEnum) {
+    const def = schema._def as unknown as { entries?: Record<string, unknown>; values?: unknown[] }
+    const first = def.entries ? Object.keys(def.entries)[0] : Array.isArray(def.values) ? def.values[0] : undefined
+    return first ?? ''
+  }
+  if (schema instanceof z.ZodString) return 'string'
+  if (schema instanceof z.ZodNumber) return 0
+  if (schema instanceof z.ZodBoolean) return true
+  if (schema instanceof z.ZodOptional) return schemaToExample((schema as unknown as { unwrap: () => z.ZodTypeAny }).unwrap())
+  if (schema instanceof z.ZodNullable) return schemaToExample((schema as unknown as { unwrap: () => z.ZodTypeAny }).unwrap())
+  if (schema instanceof z.ZodDefault) return schemaToExample((schema._def as unknown as { innerType: z.ZodTypeAny }).innerType)
+  if (schema instanceof z.ZodLiteral) {
+    const def = schema._def as unknown as { values?: unknown[] }
+    return Array.isArray(def.values) ? def.values[0] : undefined
+  }
+  return 'value'
 }
